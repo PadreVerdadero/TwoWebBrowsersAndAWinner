@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Two Rooms and a Boom (Web)</title>
+  <style>
+    .room { 
+      width: 45%; 
+      border: 1px solid #ccc; 
+      display: inline-block; 
+      vertical-align: top; 
+      padding: 10px; 
+    }
+    .player { 
+      padding: 5px; 
+      margin: 5px; 
+      border: 1px solid #999; 
+      border-radius: 5px; 
+    }
+    .leader { 
+      font-weight: bold; 
+      color: gold; 
+    }
+    .chat { 
+      margin-top: 20px; 
+    }
+  </style>
+</head>
+<body>
+  <div class="room" id="roomA">
+    <h2>Room A</h2>
+    <div class="player">Alice</div>
+    <div class="player">Bob</div>
+  </div>
+
+  <div class="room" id="roomB">
+    <h2>Room B</h2>
+    <div class="player">Carol</div>
+    <div class="player">Dave</div>
+  </div>
+
+  <div class="chat">
+    <h3>Room Chat</h3>
+    <div id="messages"></div>
+    <input type="text" id="chatInput" placeholder="Type a message">
+    <button onclick="sendMessage()">Send</button>
+    <button onclick="revealColor()">Reveal Color</button>
+    <button onclick="revealRole()">Reveal Role</button>
+    <button onclick="voteLeader()">Vote Leader</button>
+    <button onclick="unpromoteLeader()">Unpromote Leader</button>
+  </div>
+</body>
+</html>
