@@ -34,43 +34,72 @@ const db = getDatabase(app);
 let playerName = null;
 let currentRoom = "roomA";
 let privateRevealsForMe = {}; // cache of reveals given to me: { sourceName: {role, revealedAt} }
+let roundTimerInterval = null; // if this client is the authoritative timer writer
 
 const joinBtn = document.getElementById("joinBtn");
+const renameBtn = document.getElementById("renameBtn");
 const playerNameInput = document.getElementById("playerNameInput");
 const messagesEl = document.getElementById("messages");
 const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
-const revealColorBtn = document.getElementById("revealColorBtn");
-const revealRoleBtn = document.getElementById("revealRoleBtn");
+const startRoundBtn = document.getElementById("startRoundBtn");
+const stopRoundBtn = document.getElementById("stopRoundBtn");
 const exchangeBtn = document.getElementById("exchangeBtn");
 const leaderAEl = document.getElementById("leaderA");
 const leaderBEl = document.getElementById("leaderB");
 const timerEl = document.getElementById("timer");
 const phaseEl = document.getElementById("phase");
 
+const actionMenu = document.getElementById("actionMenu");
+const actionMenuTitle = document.getElementById("actionMenuTitle");
+const menuToggleLeader = document.getElementById("menuToggleLeader");
+const menuPrivateMsg = document.getElementById("menuPrivateMsg");
+const menuRevealColor = document.getElementById("menuRevealColor");
+const menuRevealRole = document.getElementById("menuRevealRole");
+const menuMarkHostage = document.getElementById("menuMarkHostage");
+const menuClose = document.getElementById("menuClose");
+
+const modalOverlay = document.getElementById("modalOverlay");
+const modalTitle = document.getElementById("modalTitle");
+const modalBody = document.getElementById("modalBody");
+const modalCancel = document.getElementById("modalCancel");
+const modalConfirm = document.getElementById("modalConfirm");
+
 /* ---------------------------
-   Join game
+   Join / rename
    --------------------------- */
 joinBtn.onclick = async () => {
-  playerName = (playerNameInput.value || "").trim() || "Player" + Math.floor(Math.random() * 1000);
-
-  // Add player to current room (public node keeps role "Unknown" unless you choose to reveal publicly later; by user request we do not do public reveals)
+  const name = (playerNameInput.value || "").trim() || "Player" + Math.floor(Math.random() * 1000);
+  playerName = name;
   await set(ref(db, `rooms/${currentRoom}/players/${playerName}`), {
     role: "Unknown",
     revealed: false
   });
+  // store a small meta node so we can enforce client-only name changes later if desired
+  await set(ref(db, `playersMeta/${playerName}`), { joinedAt: Date.now() });
 
   document.getElementById("nameSelect").style.display = "none";
+  renameBtn.style.display = "inline-block";
 
-  // Render both rooms and leader labels
+  // Render UI and listeners
   renderRoom("roomA", "playersA");
   renderRoom("roomB", "playersB");
   renderLeaderLabels();
-
-  // Attach inbox listener for me (my personal inbox)
   attachInboxListener(playerName);
+  attachPrivateRevealsListener(playerName);
+  attachRoundListener(); // listen to DB authoritative round state
+};
 
-  // Attach private reveals listener for me
+renameBtn.onclick = async () => {
+  const newName = prompt("Enter new name:");
+  if (!newName) return;
+  // Remove old node and create new node under current room
+  await remove(ref(db, `rooms/${currentRoom}/players/${playerName}`));
+  await remove(ref(db, `playersMeta/${playerName}`));
+  playerName = newName.trim();
+  await set(ref(db, `rooms/${currentRoom}/players/${playerName}`), { role: "Unknown", revealed: false });
+  await set(ref(db, `playersMeta/${playerName}`), { joinedAt: Date.now() });
+  attachInboxListener(playerName);
   attachPrivateRevealsListener(playerName);
 };
 
@@ -83,12 +112,10 @@ chatInput.addEventListener("keypress", e => { if (e.key === "Enter") sendRoomMes
 async function sendRoomMessage() {
   const text = chatInput.value.trim();
   if (!text || !playerName) return;
-  // Get list of players currently in the room
   const playersSnap = await get(child(ref(db), `rooms/${currentRoom}/players`));
   const players = playersSnap.exists() ? playersSnap.val() : {};
   const ts = Date.now();
 
-  // For each player in the room, push a message into their inbox
   const promises = Object.keys(players).map(target => {
     const msgRef = push(ref(db, `inboxes/${target}/messages`));
     return set(msgRef, {
@@ -131,56 +158,7 @@ async function revealToTarget(target, revealPayload) {
 }
 
 /* ---------------------------
-   Reveal buttons: always choose a target player in the current room
-   (no public reveals)
-   --------------------------- */
-revealColorBtn.onclick = async () => {
-  if (!playerName) return;
-  const target = await chooseTargetInRoom(currentRoom);
-  if (!target) return;
-  const color = Math.random() > 0.5 ? "Red" : "Blue";
-  await revealToTarget(target, { role: color });
-  alert(`You revealed your color (${color}) to ${target}.`);
-};
-
-revealRoleBtn.onclick = async () => {
-  if (!playerName) return;
-  const target = await chooseTargetInRoom(currentRoom);
-  if (!target) return;
-  const role = Math.random() > 0.5 ? "President" : "Bomber";
-  await revealToTarget(target, { role });
-  alert(`You revealed your role (${role}) to ${target}.`);
-};
-
-/* ---------------------------
-   Helper: prompt to choose a target from players currently in a room
-   returns the chosen player name or null
-   --------------------------- */
-async function chooseTargetInRoom(roomId) {
-  const playersSnap = await get(ref(db, `rooms/${roomId}/players`));
-  if (!playersSnap.exists()) {
-    alert("No players in the room to choose.");
-    return null;
-  }
-  const players = Object.keys(playersSnap.val()).filter(n => n !== playerName);
-  if (players.length === 0) {
-    const selfChoice = confirm("No other players in the room. Reveal to yourself?");
-    return selfChoice ? playerName : null;
-  }
-  const list = players.join(", ");
-  const choice = prompt(`Choose a player to reveal to (type exact name):\n${list}`);
-  if (!choice) return null;
-  if (!players.includes(choice)) {
-    alert("Invalid player name.");
-    return null;
-  }
-  return choice;
-}
-
-/* ---------------------------
-   Render room players
-   - shows only private reveals that the current viewer has been given
-   - clicking a player opens a small action menu (toggle leader / private message / private reveal / mark hostage)
+   Render room players (contextual menu)
    --------------------------- */
 function renderRoom(roomId, containerId) {
   const playersRef = ref(db, `rooms/${roomId}/players`);
@@ -190,7 +168,6 @@ function renderRoom(roomId, containerId) {
     const container = document.getElementById(containerId);
     container.innerHTML = "";
 
-    // Pre-fetch leader once for styling
     const leaderSnap = await get(leaderRef);
     const leaderName = leaderSnap.exists() ? leaderSnap.val() : null;
 
@@ -199,13 +176,11 @@ function renderRoom(roomId, containerId) {
       const div = document.createElement("div");
       div.className = "player";
 
-      // Apply leader style if applicable
       if (leaderName === name) div.classList.add("leader");
 
-      // Determine display text and emoji based only on private reveals for me
+      // Display only private reveals for me
       let displayText = name;
       let emoji = "";
-
       const privateReveal = privateRevealsForMe[name];
       if (privateReveal && privateReveal.role) {
         const r = privateReveal.role;
@@ -215,72 +190,130 @@ function renderRoom(roomId, containerId) {
         else if (r === "Bomber") emoji = "💣";
         displayText = `${name} ${emoji}`;
       } else {
-        // No private reveal for me; show only the name (no public reveals)
         displayText = name;
       }
 
       div.textContent = displayText;
 
-      // Click handler: open a small action prompt
-      div.onclick = async (e) => {
+      // Click handler: show contextual action menu
+      div.onclick = (e) => {
         e.stopPropagation();
-        const action = prompt(
-`Actions for ${name} (enter number):
-1) Toggle leader
-2) Private message
-3) Reveal color to this player (private)
-4) Reveal role to this player (private)
-5) Mark/unmark hostage target (leader only)
-(Leave blank to cancel)`
-        );
-        if (!action) return;
-
-        if (action === "1") {
-          // toggle leader
-          const leaderSnap2 = await get(leaderRef);
-          const currentLeader = leaderSnap2.exists() ? leaderSnap2.val() : null;
-          if (currentLeader === name) await set(leaderRef, null);
-          else await set(leaderRef, name);
-          return;
-        }
-
-        if (action === "2") {
-          const text = prompt(`Private message to ${name}:`);
-          if (text) await sendPrivateMessage(name, text);
-          return;
-        }
-
-        if (action === "3") {
-          const color = Math.random() > 0.5 ? "Red" : "Blue";
-          await revealToTarget(name, { role: color });
-          alert(`You revealed your color (${color}) to ${name}.`);
-          return;
-        }
-
-        if (action === "4") {
-          const role = Math.random() > 0.5 ? "President" : "Bomber";
-          await revealToTarget(name, { role });
-          alert(`You revealed your role (${role}) to ${name}.`);
-          return;
-        }
-
-        if (action === "5") {
-          const currentTargetSnap = await get(ref(db, `rooms/${roomId}/hostageTarget`));
-          const currentTarget = currentTargetSnap.exists() ? currentTargetSnap.val() : null;
-          if (currentTarget === name) {
-            await set(ref(db, `rooms/${roomId}/hostageTarget`), null);
-            alert(`${name} unmarked as hostage target.`);
-          } else {
-            await set(ref(db, `rooms/${roomId}/hostageTarget`), name);
-            alert(`${name} marked as hostage target.`);
-          }
-          return;
-        }
+        showActionMenuFor(name, e.clientX, e.clientY, roomId);
       };
 
       container.appendChild(div);
     }
   });
+}
+
+/* ---------------------------
+   Contextual action menu logic
+   --------------------------- */
+let actionTarget = null;
+function showActionMenuFor(targetName, x, y, roomId) {
+  actionTarget = { name: targetName, roomId };
+  actionMenuTitle.textContent = `Actions for ${targetName}`;
+  actionMenu.style.left = `${x}px`;
+  actionMenu.style.top = `${y}px`;
+  actionMenu.style.display = "block";
+}
+
+menuClose.onclick = () => { actionMenu.style.display = "none"; actionTarget = null; };
+
+menuToggleLeader.onclick = async () => {
+  if (!actionTarget) return;
+  const leaderRef = ref(db, `rooms/${actionTarget.roomId}/leader`);
+  const snap = await get(leaderRef);
+  const currentLeader = snap.exists() ? snap.val() : null;
+  if (currentLeader === actionTarget.name) await set(leaderRef, null);
+  else await set(leaderRef, actionTarget.name);
+  actionMenu.style.display = "none";
+};
+
+menuPrivateMsg.onclick = () => {
+  if (!actionTarget) return;
+  openModal(`Private message to ${actionTarget.name}`, createMessageForm(), async () => {
+    const text = document.getElementById("modalInput").value.trim();
+    if (text) await sendPrivateMessage(actionTarget.name, text);
+  });
+  actionMenu.style.display = "none";
+};
+
+menuRevealColor.onclick = () => {
+  if (!actionTarget) return;
+  openModal(`Reveal color to ${actionTarget.name}`, createRevealForm("color"), async () => {
+    const color = document.getElementById("modalSelect").value;
+    await revealToTarget(actionTarget.name, { role: color });
+  });
+  actionMenu.style.display = "none";
+};
+
+menuRevealRole.onclick = () => {
+  if (!actionTarget) return;
+  openModal(`Reveal role to ${actionTarget.name}`, createRevealForm("role"), async () => {
+    const role = document.getElementById("modalSelect").value;
+    await revealToTarget(actionTarget.name, { role });
+  });
+  actionMenu.style.display = "none";
+};
+
+menuMarkHostage.onclick = async () => {
+  if (!actionTarget) return;
+  const roomId = actionTarget.roomId;
+  const currentTargetSnap = await get(ref(db, `rooms/${roomId}/hostageTarget`));
+  const currentTarget = currentTargetSnap.exists() ? currentTargetSnap.val() : null;
+  if (currentTarget === actionTarget.name) {
+    await set(ref(db, `rooms/${roomId}/hostageTarget`), null);
+    alert(`${actionTarget.name} unmarked as hostage target.`);
+  } else {
+    await set(ref(db, `rooms/${roomId}/hostageTarget`), actionTarget.name);
+    alert(`${actionTarget.name} marked as hostage target.`);
+  }
+  actionMenu.style.display = "none";
+};
+
+/* ---------------------------
+   Modal helpers
+   --------------------------- */
+function openModal(title, bodyHtml, onConfirm) {
+  modalTitle.textContent = title;
+  modalBody.innerHTML = "";
+  if (typeof bodyHtml === "string") modalBody.innerHTML = bodyHtml;
+  else modalBody.appendChild(bodyHtml);
+  modalOverlay.style.display = "flex";
+
+  modalCancel.onclick = () => { modalOverlay.style.display = "none"; };
+  modalConfirm.onclick = async () => {
+    await onConfirm();
+    modalOverlay.style.display = "none";
+  };
+}
+
+function createMessageForm() {
+  const wrapper = document.createElement("div");
+  const input = document.createElement("textarea");
+  input.id = "modalInput";
+  input.rows = 4;
+  input.placeholder = "Type your private message...";
+  wrapper.appendChild(input);
+  return wrapper;
+}
+
+function createRevealForm(type) {
+  const wrapper = document.createElement("div");
+  const select = document.createElement("select");
+  select.id = "modalSelect";
+  if (type === "color") {
+    const o1 = document.createElement("option"); o1.value = "Red"; o1.textContent = "Red";
+    const o2 = document.createElement("option"); o2.value = "Blue"; o2.textContent = "Blue";
+    select.appendChild(o1); select.appendChild(o2);
+  } else {
+    const o1 = document.createElement("option"); o1.value = "President"; o1.textContent = "President";
+    const o2 = document.createElement("option"); o2.value = "Bomber"; o2.textContent = "Bomber";
+    select.appendChild(o1); select.appendChild(o2);
+  }
+  wrapper.appendChild(select);
+  return wrapper;
 }
 
 /* ---------------------------
@@ -299,8 +332,6 @@ function renderLeaderLabels() {
 
 /* ---------------------------
    Inbox listener (my personal inbox)
-   - shows both room messages (labeled) and private messages
-   - room messages are delivered to inboxes of players present at send time
    --------------------------- */
 function attachInboxListener(viewerName) {
   if (!viewerName) return;
@@ -326,24 +357,18 @@ function attachInboxListener(viewerName) {
 
 /* ---------------------------
    Private reveals listener for me
-   - caches reveals given to me so renderRoom can show them
    --------------------------- */
 function attachPrivateRevealsListener(viewerName) {
   if (!viewerName) return;
   onValue(ref(db, `privateReveals/${viewerName}`), snap => {
     privateRevealsForMe = snap.val() || {};
-    // Re-render both rooms so reveals are visible immediately
     renderRoom("roomA", "playersA");
     renderRoom("roomB", "playersB");
   });
 }
 
 /* ---------------------------
-   Hostage exchange
-   - Only leader of the room can perform exchange
-   - Exchange window enforced by timer (last 20s)
-   - Leader moves the marked hostage target (rooms/{roomId}/hostageTarget) to the other room
-   - If no hostageTarget set, leader can choose a target or move themselves
+   Hostage exchange (leader only)
    --------------------------- */
 exchangeBtn.onclick = async () => {
   if (!playerName) return;
@@ -352,7 +377,6 @@ exchangeBtn.onclick = async () => {
     return;
   }
 
-  // Check leader for current room
   const leaderSnap = await get(ref(db, `rooms/${currentRoom}/leader`));
   const leader = leaderSnap.exists() ? leaderSnap.val() : null;
   if (leader !== playerName) {
@@ -360,11 +384,9 @@ exchangeBtn.onclick = async () => {
     return;
   }
 
-  // Get hostage target
   const targetSnap = await get(ref(db, `rooms/${currentRoom}/hostageTarget`));
   let target = targetSnap.exists() ? targetSnap.val() : null;
   if (!target) {
-    // If none set, ask leader to choose
     const playersSnap = await get(ref(db, `rooms/${currentRoom}/players`));
     const players = playersSnap.exists() ? Object.keys(playersSnap.val()) : [];
     const choice = prompt(`No hostage target set. Enter player name to move (or leave blank to move yourself):\n${players.join(", ")}`);
@@ -372,48 +394,121 @@ exchangeBtn.onclick = async () => {
     else target = playerName;
   }
 
-  // Move target to other room
   const newRoom = currentRoom === "roomA" ? "roomB" : "roomA";
   const playerInfoSnap = await get(ref(db, `rooms/${currentRoom}/players/${target}`));
   const info = playerInfoSnap.exists() ? playerInfoSnap.val() : { role: "Unknown", revealed: false };
 
   await set(ref(db, `rooms/${newRoom}/players/${target}`), info);
   await remove(ref(db, `rooms/${currentRoom}/players/${target}`));
-
-  // Clear hostage target and leader in old room
   await set(ref(db, `rooms/${currentRoom}/hostageTarget`), null);
   await set(ref(db, `rooms/${currentRoom}/leader`), null);
 
-  // If I moved, update my currentRoom
-  if (target === playerName) {
-    currentRoom = newRoom;
-  }
-
+  if (target === playerName) currentRoom = newRoom;
   alert(`${target} moved to ${newRoom}.`);
 };
 
 /* ---------------------------
-   Round timer & exchange window
+   DB-authoritative round state
+   - stored at /meta/round: { timeLeft, phase, running, startedBy }
+   - any client can start; the client that starts becomes the authoritative writer
    --------------------------- */
-let timeLeft = 180;
-let inExchangeWindow = false;
+startRoundBtn.onclick = async () => {
+  if (!playerName) { alert("Join first"); return; }
+  // Attempt to start round only if not already running
+  const roundRef = ref(db, `meta/round`);
+  const snap = await get(roundRef);
+  const current = snap.exists() ? snap.val() : null;
+  if (current && current.running) {
+    alert("Round already running.");
+    return;
+  }
+  // Initialize round state and become authoritative writer
+  await set(roundRef, { timeLeft: 180, phase: "discussion", running: true, startedBy: playerName });
+  startAuthoritativeTimer(roundRef, playerName);
+};
 
-function startTimer() {
-  setInterval(() => {
-    timeLeft -= 1;
-    if (timeLeft <= 0) {
-      // Reset round
-      timeLeft = 180;
-      inExchangeWindow = false;
+stopRoundBtn.onclick = async () => {
+  const roundRef = ref(db, `meta/round`);
+  await set(roundRef, { timeLeft: 0, phase: "stopped", running: false, startedBy: null });
+  // If this client was writing, stop local interval
+  if (roundTimerInterval) { clearInterval(roundTimerInterval); roundTimerInterval = null; }
+};
+
+/* Listen to round state and update UI */
+function attachRoundListener() {
+  onValue(ref(db, `meta/round`), snap => {
+    const r = snap.val();
+    if (!r) {
+      timerEl.textContent = "180";
       phaseEl.textContent = "Phase: Discussion";
-    } else if (timeLeft <= 20) {
-      inExchangeWindow = true;
-      phaseEl.textContent = "Phase: Hostage Exchange Window";
-    } else {
       inExchangeWindow = false;
-      phaseEl.textContent = "Phase: Discussion";
+      return;
     }
-    timerEl.textContent = timeLeft;
+    timerEl.textContent = r.timeLeft ?? 180;
+    phaseEl.textContent = `Phase: ${r.phase ?? "Discussion"}`;
+    inExchangeWindow = (r.timeLeft <= 20 && r.running);
+    // If this client is the authoritative writer, ensure we have an interval running
+    if (r.running && r.startedBy === playerName && !roundTimerInterval) {
+      startAuthoritativeTimer(ref(db, `meta/round`), playerName);
+    }
+  });
+}
+
+/* If this client starts the round, it becomes the authoritative writer and updates DB every second */
+function startAuthoritativeTimer(roundRef, starterName) {
+  // Clear any existing interval
+  if (roundTimerInterval) clearInterval(roundTimerInterval);
+  roundTimerInterval = setInterval(async () => {
+    const snap = await get(roundRef);
+    const r = snap.exists() ? snap.val() : null;
+    if (!r || !r.running) {
+      clearInterval(roundTimerInterval);
+      roundTimerInterval = null;
+      return;
+    }
+    let timeLeft = (r.timeLeft ?? 180) - 1;
+    let phase = "discussion";
+    if (timeLeft <= 0) {
+      timeLeft = 180;
+      phase = "discussion";
+      // stop running for a fresh start (or you can auto-loop)
+      await set(roundRef, { timeLeft, phase, running: false, startedBy: null });
+      clearInterval(roundTimerInterval);
+      roundTimerInterval = null;
+      return;
+    } else if (timeLeft <= 20) {
+      phase = "exchange";
+    } else {
+      phase = "discussion";
+    }
+    await set(roundRef, { timeLeft, phase, running: true, startedBy: starterName });
   }, 1000);
 }
-startTimer();
+
+/* ---------------------------
+   Listen for round state on load
+   --------------------------- */
+attachRoundListener();
+
+/* ---------------------------
+   When a player joins, attach inbox and reveals listeners
+   --------------------------- */
+function attachInboxListenerAndReveals(viewerName) {
+  attachInboxListener(viewerName);
+  attachPrivateRevealsListener(viewerName);
+}
+
+/* ---------------------------
+   Utility: safe get
+   --------------------------- */
+async function safeGet(path) {
+  const snap = await get(ref(db, path));
+  return snap.exists() ? snap.val() : null;
+}
+
+/* ---------------------------
+   Start rendering when page loads (rooms will update when players join)
+   --------------------------- */
+renderRoom("roomA", "playersA");
+renderRoom("roomB", "playersB");
+renderLeaderLabels();
