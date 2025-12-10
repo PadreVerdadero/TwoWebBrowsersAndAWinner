@@ -1,8 +1,6 @@
-// Import Firebase SDK
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
 import { getDatabase, ref, set, push, onValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
 
-// Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyB7fXtog_41paX_ucqFadY4_qaDkBOFdP8",
   authDomain: "twowebbrowsers.firebaseapp.com",
@@ -12,12 +10,11 @@ const firebaseConfig = {
   appId: "1:187940323050:web:be4be5d2dd748664692193"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 let playerName = null;
-let currentRoom = "roomA"; // default
+let currentRoom = "roomA";
 
 // --- Join Game ---
 function joinGame() {
@@ -41,8 +38,7 @@ function sendMessage() {
 }
 window.sendMessage = sendMessage;
 
-// Enter key sends message
-document.getElementById("chatInput").addEventListener("keypress", function(e) {
+document.getElementById("chatInput").addEventListener("keypress", e => {
   if (e.key === "Enter") sendMessage();
 });
 
@@ -68,30 +64,33 @@ function revealRole() {
 }
 window.revealRole = revealRole;
 
-// --- Leader Voting ---
-function voteLeader() {
-  set(ref(db, `rooms/${currentRoom}/leader`), playerName);
-}
-window.voteLeader = voteLeader;
-
-function unpromoteLeader() {
-  set(ref(db, `rooms/${currentRoom}/leader`), null);
-}
-window.unpromoteLeader = unpromoteLeader;
-
-// --- Hostage Exchange ---
+// --- Hostage Exchange (Leader Only) ---
 function exchangeHostage() {
-  // Move current player to opposite room
-  const newRoom = currentRoom === "roomA" ? "roomB" : "roomA";
-  set(ref(db, `rooms/${newRoom}/players/${playerName}`), {
-    role: "Unknown",
-    revealed: false,
-    leader: false
-  });
-  set(ref(db, `rooms/${currentRoom}/players/${playerName}`), null);
-  currentRoom = newRoom;
+  // Check if current player is leader
+  onValue(ref(db, `rooms/${currentRoom}/leader`), snapshot => {
+    if (snapshot.val() === playerName) {
+      const newRoom = currentRoom === "roomA" ? "roomB" : "roomA";
+      set(ref(db, `rooms/${newRoom}/players/${playerName}`), {
+        role: "Unknown",
+        revealed: false,
+        leader: false
+      });
+      set(ref(db, `rooms/${currentRoom}/players/${playerName}`), null);
+      currentRoom = newRoom;
+    } else {
+      alert("Only the leader can exchange hostages!");
+    }
+  }, { onlyOnce: true });
 }
 window.exchangeHostage = exchangeHostage;
+
+// --- Leader Voting by Clicking ---
+function voteLeader(clickedName) {
+  set(ref(db, `rooms/${currentRoom}/leader`), clickedName);
+}
+function unpromoteLeader(clickedName) {
+  set(ref(db, `rooms/${currentRoom}/leader`), null);
+}
 
 // --- Sync UI ---
 function renderPlayers(roomId, containerId) {
@@ -101,13 +100,21 @@ function renderPlayers(roomId, containerId) {
     container.innerHTML = "";
     for (let p in players) {
       let emoji = "";
+      let cssClass = "player";
       if (players[p].revealed) {
-        if (players[p].role === "President") emoji = "👑";
+        if (players[p].role === "Red") { emoji = "🔴"; cssClass += " red"; }
+        else if (players[p].role === "Blue") { emoji = "🔵"; cssClass += " blue"; }
+        else if (players[p].role === "President") emoji = "👑";
         else if (players[p].role === "Bomber") emoji = "💣";
-        else if (players[p].role === "Red") emoji = "🔴";
-        else if (players[p].role === "Blue") emoji = "🔵";
       }
-      container.innerHTML += `<div class="player">${p} ${emoji}</div>`;
+      const div = document.createElement("div");
+      div.className = cssClass + (players[p].leader ? " leader" : "");
+      div.textContent = `${p} ${emoji}`;
+      div.onclick = () => {
+        if (players[p].leader) unpromoteLeader(p);
+        else voteLeader(p);
+      };
+      container.appendChild(div);
     }
   });
 }
@@ -123,3 +130,12 @@ onValue(ref(db, `rooms/${currentRoom}/chat`), snapshot => {
     container.innerHTML += `<p><strong>${messages[m].sender}:</strong> ${messages[m].text}</p>`;
   }
 });
+
+// --- Round Timer ---
+let timeLeft = 180;
+function startTimer() {
+  const timerElement = document.getElementById("timer");
+  setInterval(() => {
+    if (timeLeft > 0) {
+      timeLeft--;
+      timerElement.textContent = time
