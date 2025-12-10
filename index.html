@@ -1,21 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
   <title>Two Rooms and a Boom (Web)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <h1>Two Rooms and a Boom</h1>
 
-  <!-- Name selection -->
   <div id="nameSelect" class="name-select">
-    <input type="text" id="playerNameInput" placeholder="Enter your name" />
+    <input id="playerNameInput" placeholder="Enter your name" />
     <button id="joinBtn">Join Game</button>
   </div>
 
-  <!-- Rooms -->
   <div class="rooms">
     <div class="room" id="roomA">
       <div class="room-header">
@@ -34,30 +32,32 @@
     </div>
   </div>
 
-  <!-- Chat and controls -->
   <div class="panel">
     <div class="chat">
-      <h3>Room Chat</h3>
+      <h3>Messages & Inbox</h3>
       <div id="messages"></div>
-      <input type="text" id="chatInput" placeholder="Type a message" />
-      <button id="sendBtn">Send</button>
+      <div class="chat-controls">
+        <input id="chatInput" placeholder="Type a message" />
+        <button id="sendBtn">Send</button>
+      </div>
     </div>
 
     <div class="actions">
       <h3>Actions</h3>
       <div class="action-row">
-        <button id="revealColorBtn">Reveal Color (Red/Blue)</button>
-        <button id="revealRoleBtn">Reveal Role (President/Bomber)</button>
+        <button id="revealColorBtn">Reveal Color (choose a player)</button>
+        <button id="revealRoleBtn">Reveal Role (choose a player)</button>
       </div>
       <div class="action-row">
-        <button id="exchangeBtn">Exchange Hostage (Leader Only)</button>
+        <button id="exchangeBtn">Exchange Hostage (Leader only)</button>
       </div>
+      <div class="note">Click a player box to open actions: toggle leader / private message / private reveal / mark hostage</div>
     </div>
 
     <div class="round">
-      <h3>Round Timer: <span id="timer">180</span> seconds</h3>
+      <h3>Round Timer: <span id="timer">180</span>s</h3>
       <div id="phase">Phase: Discussion</div>
-      <div class="tip">Exchange window opens in the last 20 seconds of the round.</div>
+      <div class="tip">Exchange window opens in the last 20 seconds.</div>
     </div>
   </div>
 
