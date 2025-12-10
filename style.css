@@ -1,1 +1,46 @@
+body {
+  font-family: Arial, sans-serif;
+  text-align: center;
+  background: #f9f9f9;
+}
 
+.rooms {
+  display: flex;
+  justify-content: space-around;
+  margin: 20px;
+}
+
+.room {
+  width: 40%;
+  border: 2px solid #ccc;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.player {
+  padding: 5px;
+  margin: 5px;
+  border: 1px solid #999;
+  border-radius: 5px;
+}
+
+.leader {
+  font-weight: bold;
+  color: gold;
+}
+
+.chat {
+  margin-top: 20px;
+  border-top: 2px solid #ccc;
+  padding-top: 10px;
+}
+
+#messages {
+  height: 150px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  margin-bottom: 10px;
+  padding: 5px;
+  background: #fff;
+}
