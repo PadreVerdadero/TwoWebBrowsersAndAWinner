@@ -62,3 +62,37 @@ h1{margin:0 0 12px 0}
 
 .round h3{margin:6px 0}
 .tip{font-size:0.9rem;color:var(--accent);margin-top:6px}
+
+/* Action menu */
+.action-menu{
+  position:fixed;
+  z-index:1000;
+  background:var(--panel);
+  border:1px solid var(--border);
+  padding:8px;
+  border-radius:6px;
+  box-shadow:0 6px 18px rgba(0,0,0,0.6);
+}
+.action-menu button{
+  display:block;
+  width:100%;
+  margin:6px 0;
+  padding:6px 8px;
+  border-radius:6px;
+  border:1px solid var(--border);
+  background:var(--card);
+  color:var(--text);
+  cursor:pointer;
+}
+
+/* Modal */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:1100;
+}
+.modal{
+  width:360px;background:var(--panel);border:1px solid var(--border);padding:12px;border-radius:8px;color:var(--text);
+}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.modal input, .modal textarea, .modal select{
+  width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text)
+}
